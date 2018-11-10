@@ -65,7 +65,7 @@ async def add_link(message: types.Message):
     user = User.get(User.chat_id == message.chat.id)
     links = user.get_links()
     text = message.text.replace('/add ','')
-    if text.startswith('http') and 'avito' in text:
+    if text.startswith('http') and ('avito' in text or 'youla.ru' in text):
         links.append(text)
         user.links = json.dumps(links)
         user.save()
@@ -98,30 +98,37 @@ def md5_from_string(source):
     return h.hexdigest()
 
 
-async def main():
+def avito_handler(url):
+	res = []
     format_name = lambda x: 'https://www.avito.ru' + x['href']
     format_km = lambda x: ''.join([i for i in x if i.isdigit() or i == '.'])
-
+	soup = BeautifulSoup(requests.get(url, verify=True).text)
+	for el in soup.select('div.item_table'):
+		ad_link = el.select('div.description h3 a')
+		try:
+			ad_link = format_name(ad_link[0])
+			if 'redirect' in ad_link:
+				continue
+		except IndexError:
+			continue
+		res.append(ad_link)
+	return res
+	
+	
+async def main():
     while True:
         await asyncio.sleep(60*5)
         for u in User.select():
             messages_to_send = []
             old_ads = u.get_ads()
             def url_handler(url):
-                soup = BeautifulSoup(requests.get(url, verify=True).text)
-                for el in soup.select('div.item_table'):
+				for ad_link in avito_handler(url):
                     if len(messages_to_send) > 3:
                         break
-                    ad_link = el.select('div.description h3 a')
-                    try:
-                        ad_link = format_name(ad_link[0])
-                        if 'redirect' in ad_link or md5_from_string(ad_link) in old_ads:
-                            continue
-                    except IndexError:
-                        continue
+					if 'redirect' in ad_link or md5_from_string(ad_link) in old_ads:
+						continue
                     messages_to_send.append(ad_link)
                     old_ads.append(md5_from_string(ad_link))
-
             [url_handler(link) for link in u.get_links()]
             u.showed_ads = json.dumps(old_ads)
             u.save()
