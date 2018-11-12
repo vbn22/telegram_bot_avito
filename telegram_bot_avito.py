@@ -99,22 +99,33 @@ def md5_from_string(source):
 
 
 def avito_handler(url):
-	res = []
+    res = []
     format_name = lambda x: 'https://www.avito.ru' + x['href']
     format_km = lambda x: ''.join([i for i in x if i.isdigit() or i == '.'])
-	soup = BeautifulSoup(requests.get(url, verify=True).text)
-	for el in soup.select('div.item_table'):
-		ad_link = el.select('div.description h3 a')
-		try:
-			ad_link = format_name(ad_link[0])
-			if 'redirect' in ad_link:
-				continue
-		except IndexError:
-			continue
-		res.append(ad_link)
-	return res
-	
-	
+    soup = BeautifulSoup(requests.get(url, verify=True).text)
+    for el in soup.select('div.item_table'):
+        ad_link = el.select('div.description h3 a')
+        try:
+            ad_link = format_name(ad_link[0])
+            if 'redirect' in ad_link:
+                continue
+        except IndexError:
+            continue
+        res.append(ad_link)
+    return res
+
+def youla_handler(url):
+    res = []
+    format_name = lambda x: 'https://youla.ru/' + x['href']
+    soup = BeautifulSoup(requests.get(url, verify=True).text)
+    for el in soup.select('li.product_item'):
+        ad_link = el.select('a')
+        try:
+            res.append(format_name(ad_link[0]))
+        except IndexError:
+            continue
+    return res
+    
 async def main():
     while True:
         await asyncio.sleep(60*5)
@@ -122,11 +133,16 @@ async def main():
             messages_to_send = []
             old_ads = u.get_ads()
             def url_handler(url):
-				for ad_link in avito_handler(url):
+                urls = []
+                if 'avito' in url:
+                    urls = avito_handler(url)
+                elif 'youla.ru' in url:
+                    urls = youla_handler(url)
+                for ad_link in urls:
                     if len(messages_to_send) > 3:
                         break
-					if 'redirect' in ad_link or md5_from_string(ad_link) in old_ads:
-						continue
+                    if 'redirect' in ad_link or md5_from_string(ad_link) in old_ads:
+                        continue
                     messages_to_send.append(ad_link)
                     old_ads.append(md5_from_string(ad_link))
             [url_handler(link) for link in u.get_links()]
