@@ -14,10 +14,95 @@ import json
 import asyncio
 import hashlib
 import re
+from dataclasses import dataclass
 
 BOT_TOKEN = '*'
 
 from local_settings import *
+
+
+def bs4_handler(url):
+    print(url)
+    return BeautifulSoup(requests.get(url, verify=True).text,"html.parser")
+
+class Ad(object):
+    max_distance_m = 2 * 1000
+    skip = False
+    need_sleep = False
+    add_message = ''
+    __body = None
+    
+    def __init__(self,url,base_link):
+        self.url = url
+        self.base_link = base_link
+        self.md5 = self.md5_from_string(url)
+
+        if 'avito' in self.base_link and 'kvartiry' in self.url:
+            walk_distances = self.walk_distances()
+            if not any(walk_distances):
+                self.skip = True
+            else:
+                self.add_message = f'{self.price_per_meter} {min(walk_distances)}'
+    
+    @property
+    def body(self):
+        if not self.__body:
+            self.__body = bs4_handler(self.url)
+            self.need_sleep = True
+        return self.__body
+    
+    @property
+    def price(self):
+        try:
+            return float(self.body.findAll('span',{'itemprop':'price'})[0].text.replace(' ',''))
+        except (IndexError,ValueError):
+            print('price')
+            return 0
+            
+    @property
+    def area(self):
+        try:
+            text =[x.text for x in self.body.findAll('li',{'class':'item-params-list-item'}) if 'Общая площадь' in x.text][0]
+            return float(text.replace(u'\xa0',u'|').replace(': ','|').split('|')[1])
+        except (IndexError,ValueError):
+            print('area')
+            return 0
+    
+    @property
+    def price_per_meter(self):
+        try:
+            price,area = self.price,self.area
+            return int(price/area)
+        except ValueError:
+            print('price_per_meter')
+            return 0
+        
+    def get_distance(self,el):
+        el=el.replace(u'\xa0',u'|')
+        try:
+            res=re.findall(r'\((.*?)\)',el)[0].split('|')
+        except IndexError:
+            return 0
+        distance = float(res[0])
+        if res[1] == 'км':
+            distance = distance * 1000
+        return distance
+
+    def walk_distances(self):
+        items_metro = self.body.findAll('span',{'class':'item-map-metro'})
+        distances = [self.get_distance(x.text) for x in items_metro]
+        return [d for d in distances if d and d < self.max_distance_m]
+
+    @staticmethod
+    def md5_from_string(source):
+        h = hashlib.md5()
+        h.update(source.encode())
+        return h.hexdigest()
+
+    @property
+    def message(self):
+        return f'{self.url} {self.add_message}'
+
 
 loop = asyncio.get_event_loop()
 
@@ -92,18 +177,11 @@ async def echo(message: types.Message):
     await bot.send_message(message.chat.id, HELP)
 
 
-
-def md5_from_string(source):
-    h = hashlib.md5()
-    h.update(source.encode())
-    return h.hexdigest()
-
-
 def avito_handler(url):
     res = []
     format_name = lambda x: 'https://www.avito.ru' + x['href']
     format_km = lambda x: ''.join([i for i in x if i.isdigit() or i == '.'])
-    soup = BeautifulSoup(requests.get(url, verify=True).text)
+    soup = bs4_handler(url)
     for el in soup.select('div.item_table'):
         ad_link = el.select('div.description h3 a')
         try:
@@ -115,30 +193,18 @@ def avito_handler(url):
         res.append(ad_link)
     return res
 
-async def check_walk_distance(url):
-    max_distance_km = 2
-    def get_distance(el):
-        el=el.replace(u'\xa0',u'|')
-        try:
-            res=re.findall(r'\((.*?)\)',el)[0].split('|')
-        except IndexError:
-            return False
-        return (res[1] == 'м' and float(res[0]) < max_distance_km * 1000) or (res[1] == 'км' and float(res[0]) < max_distance_km)
-    ad_page = BeautifulSoup(requests.get(url, verify=True).text)
-    items_metro = ad_page.findAll('span',{'class':'item-map-metro'})
-    distances = [x for x in items_metro if get_distance(x.text)]
-    await asyncio.sleep(20)
-    return any(distances)
-
 
 def cian_handler(url):
     def find(elements,tag,name):
         return [x for x in elements.findAll(tag) if name in ''.join(x.attrs.get('class',''))]
 
     res = []
-    soup = BeautifulSoup(requests.get(url, verify=True).text)
+    soup = bs4_handler(url)
     wrappers = find(soup,'div','wrapper')
-    most_big = sorted([(i,len(f.text))for i,f in enumerate(wrappers)],key=lambda x:x[1],reverse=True)[0][0]
+    try:
+        most_big = sorted([(i,len(f.text))for i,f in enumerate(wrappers)],key=lambda x:x[1],reverse=True)[0][0]
+    except IndexError:
+        return res
 
     for el in find(wrappers[most_big],'div','card'):
         try:
@@ -151,7 +217,7 @@ def cian_handler(url):
 def youla_handler(url):
     res = []
     format_name = lambda x: 'https://youla.ru/' + x['href']
-    soup = BeautifulSoup(requests.get(url, verify=True).text)
+    soup = bs4_handler(url)
     for el in soup.select('li.product_item'):
         ad_link = el.select('a')
         try:
@@ -174,26 +240,30 @@ async def main():
     print('start')
     while True:
         for u in User.select():
-            messages_to_send = []
+            ads = []
             old_ads = u.get_ads()
             for base_link in u.get_links():
+                #if not ('avito' in base_link and 'kvartiry' in base_link):
+                #    print(base_link,'continue')
+                #    continue
+                #print(base_link)
                 for ad_link in url_handler(base_link):
-                    if len(messages_to_send) > 3:
+                    ad = Ad(ad_link,base_link)
+                    #print(ad.need_sleep)
+                    if ad.need_sleep:
+                        await asyncio.sleep(7)
+                    if len(ads) > 3:
                         break
-                    if 'redirect' in ad_link or (md5_from_string(ad_link) in old_ads):
+                    if 'redirect' in ad.url or (ad.md5 in old_ads) or ad.skip:
                         continue
-                    if 'avito' in base_link and 'kvartiry' in ad_link:
-                        walk_distance = await check_walk_distance(ad_link)
-                        if walk_distance:
-                            messages_to_send.append(ad_link)
-                    else:
-                        messages_to_send.append(ad_link)
-                    old_ads.append(md5_from_string(ad_link))
+                    ads.append(ad)
+                    old_ads.append(ad.md5)
+                await asyncio.sleep(7)
             u.showed_ads = json.dumps(old_ads)
             u.save()
-            if messages_to_send:
-               await bot.send_message(u.chat_id, '\n'.join(messages_to_send))
-        await asyncio.sleep(60*5)
+            if ads:
+               await bot.send_message(u.chat_id, '\n'.join([a.message for a in ads]))
+        await asyncio.sleep(60*10)
 
 
 if __name__ == '__main__':
