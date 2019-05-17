@@ -151,7 +151,7 @@ async def add_link(message: types.Message):
     user = User.get(User.chat_id == message.chat.id)
     links = user.get_links()
     text = message.text.replace('/add ','')
-    if text.startswith('http') and ('avito' in text or 'youla.ru' in text or 'cian.ru' in text):
+    if text.startswith('http') and ('avito' in text or 'youla.ru' in text or 'cian.ru' in text or 'domofond' in text):
         links.append(text)
         user.links = json.dumps(links)
         user.save()
@@ -226,6 +226,11 @@ def youla_handler(url):
             continue
     return res
 
+def domofond_handler(url):
+    format_name = lambda x: f'https://www.domofond.ru{x}'
+    soup = bs4_handler(url)
+    filter_el = lambda x:list(filter(lambda p: 'long-item' in p, x.attrs.get('class', [])))
+    return [format_name(el.attrs.get('href','')) for el in soup.select('a') if filter_el(el)]
 
 def url_handler(url):
     if 'avito' in url:
@@ -234,6 +239,8 @@ def url_handler(url):
         return youla_handler(url)
     elif 'cian.ru' in url:
         return cian_handler(url)
+    elif 'domofond' in url:
+        return domofond_handler(url)
     return []
 
 async def main():
