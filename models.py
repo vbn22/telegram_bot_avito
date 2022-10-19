@@ -2,7 +2,7 @@ from peewee import *
 import datetime
 import json
 
-db = SqliteDatabase('/home/app/telegram_bot_avito/my_database.db')
+db = SqliteDatabase('./my_database.db')
 
 
 
