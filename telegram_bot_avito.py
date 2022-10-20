@@ -1,21 +1,18 @@
 import asyncio
 import hashlib
 import json
-import json
-import pickle
 import re
-import time
-import time
 import urllib
-from contextlib import closing
-from dataclasses import dataclass
-from datetime import datetime, timedelta
 
 import requests
-import telegram
 from aiogram import Bot, Dispatcher, executor, types
 from bs4 import BeautifulSoup
+
 from models import User
+
+rom
+urllib.parse
+import urlparse
 
 BOT_TOKEN = '*'
 
@@ -256,7 +253,8 @@ def ebay_handler(url):
         time = re.findall(r'(.*?)m\sleft', time_left[0].text) or re.findall(r'Осталось\s(.*?)\sмин', time_left[0].text)
         if not time:
             continue
-        links.append(el.select('a.s-item__link')[0]['href'])
+        parse_url = urlparse(el.select('a.s-item__link')[0]['href'])
+        links.append(f'{parse_url.scheme}://{parse_url.hostname}/{parse_url.path}')
     return links
 
 
