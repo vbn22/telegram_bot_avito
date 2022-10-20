@@ -2,17 +2,13 @@ import asyncio
 import hashlib
 import json
 import re
-import urllib
+from urllib.parse import urlparse
 
 import requests
 from aiogram import Bot, Dispatcher, executor, types
 from bs4 import BeautifulSoup
 
 from models import User
-
-rom
-urllib.parse
-import urlparse
 
 BOT_TOKEN = '*'
 
